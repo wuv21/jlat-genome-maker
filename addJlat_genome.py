@@ -14,6 +14,9 @@ HG38_GENOME_FN = "fasta/hg38_only_genome.fa"
 
 HG38_DENYLIST_FN = "denylist/hg38_boyleLab_denylist.v2.bed"
 
+HG38_GTF_FN = "gtf/hg38.gtf"
+JLAT_GTF_FN = "gtf/jlat.gtf"
+
 # take`n from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5237276/
 # position is the hg38 nucleotide position following 3' LTR end.
 # note that the above paper has incorrect numbers in their table
@@ -130,7 +133,36 @@ def generate_integrated_jlat(jlat_seq: Seq, target_dir: str, jlat_name: str, jla
         SeqIO.write(record, out_handle, "fasta")
 
 
-def generate_shifted_denylist(jlat_name: str, jlat: list, jlat_len: int = 10200, duplication: int = 5) -> None: 
+def get_insertion_pos(jlat: list) -> int:
+  """todo will add this stuff
+  
+  Args:
+    jlat_name:
+    jlat:
+    jlat_len:
+    duplication:
+
+  Returns:
+    None
+
+  """
+  orient = jlat[1]
+  pos = jlat[2]
+  
+  # reminder that bed file is 0 indexed. start is inclusive. end is exclusive.
+  if orient == "-":
+    insertionPos = pos + 1
+  elif orient == "+":
+    insertionPos = pos + 4
+
+  return(insertionPos)
+
+
+def generate_shifted_denylist(
+  jlat_name: str,
+  jlat: list,
+  jlat_len: int = 10200,
+  duplication: int = 5) -> None: 
   """todo will add this stuff
   
   Args:
@@ -147,12 +179,8 @@ def generate_shifted_denylist(jlat_name: str, jlat: list, jlat_len: int = 10200,
   orient = jlat[1]
   pos = jlat[2]
   
-  # reminder that bed file is 0 indexed. start is inclusive. end is exclusive.
-  if orient == "-":
-    insertionPos = pos + 1
-  elif orient == "+":
-    insertionPos = pos + 4
-  
+  insertionPos = get_insertion_pos(jlat)
+
   modified_fn = "denylist/" + jlat_name + ".bed"
 
   with open(HG38_DENYLIST_FN, "r") as f:
@@ -174,24 +202,44 @@ def generate_shifted_denylist(jlat_name: str, jlat: list, jlat_len: int = 10200,
       fo.write("\t".join(map(lambda x: str(x), fields)))
 
 
-def main():
-  jlat_seq = get_jlat_only_sequence(MN989412_FA_FN)
+
+def generate_integrated_gtf(
+  jlat_name: str,
+  jlat: list,
+  jlat_len: int = 10200,
+  duplication: int = 5) -> None:
+  """todo will add this stuff
   
-  for jlat in JLAT_META:
-    print("Working on jlat:", jlat)
-    generate_integrated_jlat(jlat_seq, "fasta", jlat, JLAT_META[jlat])
+  Args:
+    jlat_name:
+    jlat:
+    jlat_len:
+    duplication:
+
+  Returns:
+    None
+
+  """
+  insertionPos = get_insertion_pos(jlat)
+  jlat_integration_chr = jlat[0]
+
+  jlat_gtf = []
+  with open(JLAT_GTF_FN, "r") as infile:
+    for line in infile:
+      fields = line.split("\t")
   
-    generate_shifted_denylist(jlat, JLAT_META[jlat])
+      fields[0] = jlat[0]
+      fields[3] = int(fields[3]) + insertionPos
+      fields[4] = int(fields[4]) + insertionPos
 
+      jlat_gtf.append(list(map(lambda x: str(x), fields)))
 
-if __name__ == "__main__":
-  main()
+  jlat_gtf = ["\t".join(x) for x in jlat_gtf]
 
+  new_gtf_fn = "gtf/hg38_" + jlat_name + ".gtf" 
 
-def make_integrated_gtf():
-  # integrate jlat to hg38 gtf
-  with open("hg38_with_jlat10-6.unprocesesed.gtf", "r") as infile:
-    with open("hg38_with_jlat10-6.procesesed.gtf", "w") as outfile:
+  with open(HG38_GTF_FN, "r") as infile:
+    with open(new_gtf_fn, "w") as outfile:
       counter = 0
       for line in infile:
         if counter < 5:
@@ -203,19 +251,29 @@ def make_integrated_gtf():
         fields[3] = int(fields[3])
         fields[4] = int(fields[4])
 
-        if fields[0] == "chr9" and fields[3] > insertionPos:
-          fields[3] += proviralSize + 5 # account for 5bp duplication
+        if fields[0] == jlat_integration_chr and fields[3] > insertionPos:
+          fields[3] += jlat_len + duplication # account for 5bp duplication
 
-        if fields[0] == "chr9" and fields[4] > insertionPos:
-          fields[4] += proviralSize + 5 # account for 5bp duplication
-
-        if fields[0] == "chrHIVJLat10.6":
-          fields[0] = "chr9"
-          fields[3] += insertionPos
-          fields[4] += insertionPos
-
-          print(str(fields))
+        if fields[0] == jlat_integration_chr and fields[4] > insertionPos:
+          fields[4] += jlat_len + duplication # account for 5bp duplication
 
         outfile.write("\t".join(map(lambda x: str(x), fields)))
-
         counter += 1
+
+      # finally add hiv gtf
+      outfile.writelines(jlat_gtf)
+
+
+def main():
+  jlat_seq = get_jlat_only_sequence(MN989412_FA_FN)
+  
+  for jlat in JLAT_META:
+    print("Working on jlat:", jlat)
+    #generate_integrated_jlat(jlat_seq, "fasta", jlat, JLAT_META[jlat])
+  
+    #generate_shifted_denylist(jlat, JLAT_META[jlat])
+    generate_integrated_gtf(jlat, JLAT_META[jlat])
+
+
+if __name__ == "__main__":
+  main()
